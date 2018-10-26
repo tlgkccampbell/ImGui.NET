@@ -38,6 +38,11 @@ namespace CodeGenerator
             WriteIndented(text);
         }
 
+        public void WriteDirective(string directive)
+        {
+            _sw.WriteLine(directive);
+        }
+
         private void WriteIndented(string text)
         {
             for (int i = 0; i < _indentLevel; i++)

@@ -232,7 +232,7 @@ namespace CodeGenerator
             {
                 using (CSharpCodeWriter writer = new CSharpCodeWriter(Path.Combine(outputPath, ed.FriendlyName + ".gen.cs")))
                 {
-                    writer.PushBlock("namespace ImGuiNET");
+                    writer.PushBlock("namespace Ultraviolet.ImGuiViewProvider.Bindings");
                     if (ed.FriendlyName.Contains("Flags"))
                     {
                         writer.WriteLine("[System.Flags]");
@@ -260,7 +260,7 @@ namespace CodeGenerator
                     writer.Using("System.Runtime.CompilerServices");
                     writer.Using("System.Text");
                     writer.WriteLine(string.Empty);
-                    writer.PushBlock("namespace ImGuiNET");
+                    writer.PushBlock("namespace Ultraviolet.ImGuiViewProvider.Bindings");
 
                     writer.PushBlock($"public unsafe partial struct {td.Name}");
                     foreach (TypeReference field in td.Fields)
@@ -420,9 +420,23 @@ namespace CodeGenerator
                 writer.Using("System");
                 writer.Using("System.Numerics");
                 writer.Using("System.Runtime.InteropServices");
+                writer.Using("Ultraviolet.Core");
+                writer.Using("Ultraviolet.Core.Native");
                 writer.WriteLine(string.Empty);
-                writer.PushBlock("namespace ImGuiNET");
+                writer.PushBlock("namespace Ultraviolet.ImGuiViewProvider.Bindings");
+                writer.WriteDirective("#pragma warning disable 1591");
+                writer.WriteLine("[SuppressUnmanagedCodeSecurity]");
                 writer.PushBlock("public static unsafe partial class ImGuiNative");
+                writer.WriteDirective("#if ANDROID");
+                writer.WriteLine("const String LIBRARY = \"cimgui\";");
+                writer.WriteDirective("#elif IOS");
+                writer.WriteLine("const String LIBRARY = \"__Internal\";");
+                writer.WriteDirective("#else");
+                writer.WriteLine("private static readonly NativeLibrary lib = new NativeLibrary(");
+                writer.WriteLine("\tUltravioletPlatformInfo.CurrentPlatform == UltravioletPlatform.Windows ? \"cimgui\" : \"libcimgui\";");
+                writer.WriteDirective("#endif");
+                writer.WriteLine(String.Empty);
+
                 foreach (FunctionDefinition fd in functions)
                 {
                     foreach (OverloadDefinition overload in fd.Overloads)
@@ -435,6 +449,7 @@ namespace CodeGenerator
 
                         bool hasVaList = false;
                         List<string> paramParts = new List<string>();
+                        List<string> paramPartsWithoutTypes = new List<string>();
                         for (int i = 0; i < overload.Parameters.Length; i++)
                         {
                             TypeReference p = overload.Parameters[i];
@@ -447,6 +462,7 @@ namespace CodeGenerator
                             if (p.Name == "...") { continue; }
 
                             paramParts.Add($"{paramType} {CorrectIdentifier(p.Name)}");
+                            paramPartsWithoutTypes.Add($"{CorrectIdentifier(p.Name)}");
 
                             if (paramType == "va_list")
                             {
@@ -458,25 +474,35 @@ namespace CodeGenerator
                         if (hasVaList) { continue; }
 
                         string parameters = string.Join(", ", paramParts);
+                        string parametersWithoutTypes = string.Join(", ", paramPartsWithoutTypes);
 
                         bool isUdtVariant = exportedName.Contains("nonUDT");
                         string methodName = isUdtVariant
                             ? exportedName.Substring(0, exportedName.IndexOf("_nonUDT"))
                             : exportedName;
 
+                        writer.WriteDirective("#if ANDROID || IOS");
                         if (isUdtVariant)
                         {
-                            writer.WriteLine($"[DllImport(\"cimgui\", CallingConvention = CallingConvention.Cdecl, EntryPoint = \"{exportedName}\")]");
-
+                            writer.WriteLine($"[DllImport(LIBRARY, CallingConvention = CallingConvention.Cdecl, EntryPoint = \"{exportedName}\")]");
                         }
                         else
                         {
-                            writer.WriteLine("[DllImport(\"cimgui\", CallingConvention = CallingConvention.Cdecl)]");
+                            writer.WriteLine("[DllImport(LIBRARY, CallingConvention = CallingConvention.Cdecl)]");
                         }
                         writer.WriteLine($"public static extern {ret} {methodName}({parameters});");
+                        writer.WriteDirective("#else");
+                        writer.WriteLine("[MonoNativeFunctionWrapper]");
+                        writer.WriteLine("[UnmanagedFunctionPointer(CallingConvention.Cdecl)]");
+                        writer.WriteLine($"private delegate {ret} {methodName}Delegate({parameters});");
+                        writer.WriteLine($"private static readonly {methodName}Delegate p{methodName} = lib.LoadFunction<{methodName}Delegate>(\"{methodName}\");");
+                        writer.WriteLine($"public static {ret} {methodName}({parameters}) => p{methodName}({parametersWithoutTypes});");
+                        writer.WriteDirective("#endif");
+                        writer.WriteLine(String.Empty);
                     }
                 }
                 writer.PopBlock();
+                writer.WriteDirective("#pragma warning restore 1591");
                 writer.PopBlock();
             }
 
@@ -487,7 +513,7 @@ namespace CodeGenerator
                 writer.Using("System.Runtime.InteropServices");
                 writer.Using("System.Text");
                 writer.WriteLine(string.Empty);
-                writer.PushBlock("namespace ImGuiNET");
+                writer.PushBlock("namespace Ultraviolet.ImGuiViewProvider.Bindings");
                 writer.PushBlock("public static unsafe partial class ImGui");
                 foreach (FunctionDefinition fd in functions)
                 {
